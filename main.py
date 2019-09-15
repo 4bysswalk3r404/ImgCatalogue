@@ -1,113 +1,138 @@
 import os
-from PIL import Image
+from PIL import Image, ImageTk
 import cv2
 import numpy as np
 import io
 import json
+import tkinter as tk
+import math
+import backend
 
-def ByteFill(bytes, size):
-    return bytes + (size - len(bytes)) * b'\x00'
+class FancyListbox(tk.Listbox):
 
-def GetImages():
-    #make sure main file exists
-    if os.path.exists("catalogue.dat"):
-        data = open("catalogue.dat", "rb").read()
-    else:
-        #if it doest throw an error
-        raise Exception("catalogue.dat does not exist")
-    #get number of images to loop through
-    imgnum = int.from_bytes(data[:1], 'big')
-    #omit first byte
-    data = data[1:]
+    def __init__(self, parent, *args, **kwargs):
+        self.parent = parent
 
-    images = []
-    #loop through images
-    for i in range(imgnum):
-        #get image name
-        imgname = data[:100]
-        #get size of current image
-        imgsize = int.from_bytes(data[100:104], 'big')
-        #get data of current image from imgsize
-        imgdata = data[104:104+imgsize]
-        #add image data to list
-        images.append([imgname, imgdata])
-        #get rid of image data
-        data = data[imgsize+104:]
-    return images
+        tk.Listbox.__init__(self, parent.root, *args, **kwargs)
 
-def AddImage(path):
-    #make sure given path exists
-    if not os.path.exists(path):
-        print(path, "does not exist")
-        return 0
-    #tell if main file exists
-    if os.path.exists("catalogue.dat"):
-        olddata = open("catalogue.dat", "rb").read()
-    else:
-        olddata = b''
-    #where the magic happens
-    with open("catalogue.dat", "wb") as catalogue:
-        #write number of images to file
-        catalogue.write((int.from_bytes(olddata[:1], 'big') + 1).to_bytes(1, 'big'))
-        #write the previous data omitting the first byte
-        catalogue.write(olddata[1:])
-        #get new image data
-        newdata = open(path, "rb").read()
-        #add file name
-        catalogue.write(os.path.basename(path).encode('utf-8') + (100 - os.path.basename(path).encode('utf-8').__len__()) * b'\x00')
-        #add size of new image
-        catalogue.write(len(newdata).to_bytes(4, 'big'))
-        #add new image
-        catalogue.write(newdata)
+        self.popup_menu = tk.Menu(self, tearoff=0)
+        self.popup_menu.add_command(label="Delete",
+                                    command=self.delete_selected)
+        self.popup_menu.add_command(label="Rename",
+                                    command=self.rename_selected)
 
-def AddDir(path):
-    exts = json.loads(open("extentions.json").read())
-    files = [path for sub in [[os.path.join(w[0], file) for file in w[2]] for w in os.walk(path)] for path in sub]
-    for file in files:
-        if os.path.splitext(file)[1] in exts:
-            print(file)
-            AddImage(file)
+        self.bind("<Button-3>", self.popup) # Button-2 on Aqua
 
-def RemoveImage(index):
-    images = GetImages()
-    #loop through images
-    with open("catalogue.dat", "wb") as catalogue:
-        #write number of images to file
-        catalogue.write((len(images) - 1).to_bytes(1, 'big'))
-        #loop through images adding all except index
-        for i, image in enumerate(images):
-            if i != index:
-                #add file name
-                catalogue.write(image[0])
-                #add image size
-                catalogue.write(len(image[1]).to_bytes(4, 'big'))
-                #add image data
-                catalogue.write(image[1])
+    def popup(self, event):
+        try:
+            self.popup_menu.tk_popup(event.x_root, event.y_root, 0)
+        finally:
+            self.popup_menu.grab_release()
 
-def LoopImages():
-    #get list of images
-    images = GetImages()
-    #loop through images
-    for image in images:
-        #retrieve imagename
-        imgname = image[0].strip(b'\x00').decode('utf-8')
-        #if image is video, write to file
-        if os.path.splitext(imgname)[1] in ['.gif', '.avi']:
-            open(imgname, "wb").write(image[1])
+    def delete_selected(self):
+        print("remove", self.curselection()[0])
+        self.parent.catalogue.removeImage(self.curselection()[0])
+        self.parent.refreshImgList()
+
+    def rename_selected(self):
+        print("rename", self.curselection()[0], "to", end=" ")
+        newname = self.parent.popup()
+        print(newname)
+        self.parent.catalogue.renameImage(self.curselection()[0], newname)
+        self.parent.refreshImgList(ImgName=newname)
+
+def shrinkImg(size, target=440):
+    largest = max(size)
+    smallest = min(size)
+    percent = round(440/largest, 2)
+    return (440, int(round(smallest) * percent))
+
+class popupWindow(object):
+    def __init__(self,master):
+        top=self.top=tk.Toplevel(master)
+        self.l=tk.Label(top,text="Hello World")
+        self.l.pack()
+        self.e=tk.Entry(top)
+        self.e.bind("<Return>", self.cleanup)
+        self.e.pack()
+        self.value = None
+    def cleanup(self, *ignore):
+        self.value=self.e.get()
+        self.top.destroy()
+
+class Main:
+    def __init__(self, CataloguePath):
+        self.catalogue = backend.Catalogue(CataloguePath)
+        self.root = tk.Tk()
+        self.ImgLabel = None
+        self.TkImgDict = None
+        self.ImageListBox = None
+        self.addType = tk.IntVar()
+
+    def __call__(self):
+        self.refreshImgList()
+
+        screenDim = (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+        windowDim = (int((screenDim[0] / 5) * 2), int((screenDim[1] / 5) * 2))
+        self.root.geometry(str(windowDim[0])+'x'+str(windowDim[1])+'+'
+            +str((screenDim[0] - windowDim[0]) // 2)+'+'+str((screenDim[1] - windowDim[1]) // 2)
+        )
+
+        self.root.configure(background='#133337')
+        #tk.Radiobutton(self.root, text="Image Dir", value=0, variable=self.addType).grid()
+        #tk.Radiobutton(self.root, text="Image File", value=1, variable=self.addType).grid()
+
+        tk.Label(self.root, text="Add Image: ").grid(row=0, column=0)
+        InputBox = tk.Entry(self.root)
+        InputBox.grid(row=0, column=3)
+        InputBox.bind("<Return>", self.AddImage_Tkinter)
+        self.root.mainloop()
+
+    def popup(self):
+        w=popupWindow(self.root)
+        self.root.wait_window(w.top)
+        return w.value
+
+    def list_entry_clicked(self, *ignore):
+        ImgName = self.ImageListBox.get(self.ImageListBox.curselection()[0])
+        self.ImgLabel.config(image=self.TkImgDict[ImgName])
+
+    def refreshImgList(self, **kwargs):
+        self.TkImgDict = {}
+        self.ImageListBox = FancyListbox(self, selectmode=tk.SINGLE)
+        MyImages = self.catalogue.getImages()
+        self.root.update()
+        print("Root window: ", self.root.winfo_width(), self.root.winfo_height())
+        for i, MyImage in enumerate(MyImages):
+            ImgName = MyImage[0]
+            PIL_img = Image.open(io.BytesIO(MyImage[1]))
+            print(ImgName, PIL_img.size, end=" ")
+            PIL_img = PIL_img.resize(shrinkImg(PIL_img.size), Image.ANTIALIAS)
+            print(PIL_img.size)
+            CurrentTkImg = ImageTk.PhotoImage(PIL_img)
+            self.TkImgDict[ImgName] = CurrentTkImg
+            self.ImageListBox.insert(tk.END, ImgName)
+        self.ImageListBox.grid(row=1, column=3)
+        self.ImgLabel = tk.Label()
+        self.ImgLabel.grid(row=1)
+        self.ImageListBox.bind('<ButtonRelease-1>', self.list_entry_clicked)
+        ImgName = kwargs.get("ImgName")
+        if ImgName != None:
+            self.ImgLabel.config(image=self.TkImgDict[ImgName])
         else:
-            #create PIL image object
-            img = Image.open(io.BytesIO(image[1]))
-            #show image
-            img.show()
-            print(imgname)
+            self.ImgLabel.config(image=self.TkImgDict[list(self.TkImgDict.keys())[0]])
+
+    def AddImage_Tkinter(self, event):
+        inputValue = event.widget.get()
+        if os.path.isfile(inputValue) and os.path.splitext(inputValue)[1] in self.catalogue.imageExtenions:
+            if self.TkImgDict.get(inputValue) == None:
+                self.catalogue.addImage(inputValue)
+                print("adding %s..." % inputValue)
+                self.refreshImgList(ImgName=os.path.basename(inputValue))
+            else:
+                print(inputValue, "already exists")
+        else:
+            print(inputValue, "\tis not an image file")
 
 if __name__ == "__main__":
-    inp = input(">>>")
-    if inp == "add":
-        AddImage(input("new image path: "))
-    elif inp == "loop":
-        LoopImages()
-    elif inp == "remove":
-        RemoveImage(int(input("image index: ")))
-    elif inp == "add dir":
-        AddDir(input("new dir: "))
+    Main("../catalogue.bin")()
