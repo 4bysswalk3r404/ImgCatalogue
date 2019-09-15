@@ -1,13 +1,35 @@
 import os
-from PIL import Image
+from PIL import Image, ImageTk, ImageSequence
 import numpy as np
+from itertools import chain
+import io
+#from StringIO import StringIO
+
+def shrinkImg(size, target=440):
+    largest = max(size)
+    smallest = min(size)
+    percent = round(target/largest, 2)
+    return (target, int(round(smallest) * percent))
 
 def ByteFill(bytes, size):
     return bytes + (size - len(bytes)) * b'\x00'
 
 class Catalogue:
+    class GIF:
+        def __init__(self, name, data):
+            im = Image.open(io.BytesIO(data))
+            self.name = name
+            self.frames = [ImageTk.PhotoImage(frame.copy().resize(shrinkImg(im.size), Image.ANTIALIAS)) for frame in ImageSequence.Iterator(im)]
+
+    class IMG:
+        def __init__(self, name, data):
+            self.name = name
+            self.data = data
+
     def __init__(self, path):
         self.path = path
+        self.gifs = None
+        self.images = None
         self.imageExtenions = [
             ".ai",
             ".bmp",
@@ -23,7 +45,7 @@ class Catalogue:
             ".jfif"
         ]
 
-    def getImages(self):
+    def getCatalogue(self):
         #make sure main file exists
         if os.path.exists(self.path):
             data = open(self.path, "rb").read()
@@ -35,7 +57,8 @@ class Catalogue:
         #omit first byte
         data = data[1:]
 
-        images = []
+        self.images = []
+        self.gifs = []
         #loop through images
         for i in range(imgnum):
             #get image name
@@ -45,12 +68,15 @@ class Catalogue:
             #get data of current image from imgsize
             imgdata = data[104:104+imgsize]
             #add image data to list
-            images.append([imgname, imgdata])
+            if os.path.splitext(imgname)[1] == ".gif":
+                self.gifs.append(self.GIF(imgname, imgdata))
+            else:
+                self.images.append(self.IMG(imgname, imgdata))
             #get rid of image data
             data = data[imgsize+104:]
-        return images
+        return list(chain.from_iterable((self.images, self.gifs)))
 
-    def addImage(self, path):
+    def addFile(self, path):
         #make sure given path exists
         if not os.path.exists(path):
             return 0
@@ -76,43 +102,42 @@ class Catalogue:
         return 1
 
     def addDir(self, path):
-        #get all image extentions
         #get all files in given directory
         files = [path for sub in [[os.path.join(w[0], file) for file in w[2]] for w in os.walk(path)] for path in sub]
         #loop through files
         for file in files:
             #if file is an image
-            if os.path.splitext(file)[1] in self.imageExtenions:
+            if os.path.splitext(file)[1] in self.imageExtenions or os.path.splitext(file)[1] in [".gif", ".avi"]:
                 print(file)
-                self.addImage(file)
+                self.addFile(file)
 
-    def renameImage(self, index, newname):
-        images = self.getImages()
+    def rename(self, index, newname):
+        items = self.getCatalogue()
         with open(self.path, "wb") as catalogue:
-            catalogue.write(len(images).to_bytes(1, 'big'))
-            for i, image in enumerate(images):
+            catalogue.write(len(items).to_bytes(1, 'big'))
+            for i, item in enumerate(items):
                 if i == index:
                     catalogue.write(ByteFill(newname.encode('utf-8'), 100))
                 else:
-                    catalogue.write(ByteFill(image[0].encode('utf-8'), 100))
-                catalogue.write(len(image[1]).to_bytes(4, 'big'))
-                catalogue.write(image[1])
+                    catalogue.write(ByteFill(item.name.encode('utf-8'), 100))
+                catalogue.write(len(item.data).to_bytes(4, 'big'))
+                catalogue.write(item.data)
 
-    def removeImage(self, index):
-        images = self.getImages()
+    def remove(self, index):
+        items = self.getCatalogue()
         #loop through images
         with open(self.path, "wb") as catalogue:
             #write number of images to file
-            catalogue.write((len(images) - 1).to_bytes(1, 'big'))
+            catalogue.write((len(items) - 1).to_bytes(1, 'big'))
             #loop through images adding all except index
-            for i, image in enumerate(images):
+            for i, item in enumerate(items):
                 if i != index:
                     #add file name
-                    catalogue.write(ByteFill(image[0].encode('utf-8'), 100))
+                    catalogue.write(ByteFill(item.name.encode('utf-8'), 100))
                     #add image size
-                    catalogue.write(len(image[1]).to_bytes(4, 'big'))
+                    catalogue.write(len(item.name).to_bytes(4, 'big'))
                     #add image data
-                    catalogue.write(image[1])
+                    catalogue.write(item.name)
 
 if __name__ == "__main__":
     inp = input(">>>")

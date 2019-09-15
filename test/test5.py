@@ -21,8 +21,8 @@ class Main:
         self.catalogue = backend.Catalogue(CataloguePath)
         self.root = tk.Tk()
         self.imgLabel = None
-        self.tkImgDict = None
-        self.tkGifDict = None
+        self.tkImgDict = {}
+        self.tkGifDict = {}
         self.imgListBox = None
         self.gifDisplay = None
         self.baseColor = '#0e2f44'
@@ -49,28 +49,30 @@ class Main:
 
     def showChosen(self, *ignore):
         ImgName = self.imgListBox.get(self.imgListBox.curselection()[0])
-        self.imgLabel.config(image=self.tkImgDict[ImgName])
+        if self.gifDisplay != None and self.gifDisplay._job != None:
+            self.gifDisplay.stop()
+        if ImgName in self.tkImgDict:
+            self.imgLabel.config(image=self.tkImgDict[ImgName])
+        elif ImgName in self.tkGifDict:
+            self.gifDisplay = frontend.GIF(self.root, self.imgLabel, ImgName, self.tkGifDict[ImgName])
+            self.gifDisplay.start()
 
     def refreshImgList(self, **kwargs):
+        self.catalogue.getCatalogue()
         self.tkImgDict = {}
+        self.tkGifDict = {}
         self.imgListBox = frontend.FancyListbox(self, selectmode=tk.SINGLE)
-        try:
-            MyImages = self.catalogue.getCatalogue()
-        except:
-            MyImages= []
-            tk.Label(frame1, text='Looks like you dont have any images yet.\n Maybe try adding some.', font='Helvetica 18 bold').pack()
-        self.root.update()
-        print("Root window: ", self.root.winfo_width(), self.root.winfo_height())
-        for MyImage in MyImages:
-            if type(MyImage) is backend.Catalogue.GIF:
-                continue
-            PIL_img = Image.open(io.BytesIO(MyImage.data))
-            print(MyImage.name, PIL_img.size, end=" ")
+        for img in self.catalogue.images:
+            PIL_img = Image.open(io.BytesIO(img.data))
+            print(img.name, PIL_img.size, end=" ")
             PIL_img = PIL_img.resize(shrinkImg(PIL_img.size), Image.ANTIALIAS)
             print(PIL_img.size)
             CurrentTkImg = ImageTk.PhotoImage(PIL_img)
-            self.tkImgDict[MyImage.name] = CurrentTkImg
-            self.imgListBox.insert(tk.END, MyImage.name)
+            self.tkImgDict[img.name] = CurrentTkImg
+            self.imgListBox.insert(tk.END, img.name)
+        for gif in self.catalogue.gifs:
+            self.imgListBox.insert(tk.END, gif.name)
+            self.tkGifDict[gif.name] = gif.frames
         self.imgListBox.config(highlightbackground=self.baseColor)
         self.imgListBox.grid(row=2, column=2, sticky="ew")
         self.imgListBox.pack_propagate(0)
